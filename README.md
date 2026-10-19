@@ -32,28 +32,28 @@ The backend service provides:
 
 ```text
 resume_matcher.Apis/
-├── requirements.txt              # Production and development pip dependencies
-├── environment.yml               # Conda environment definition
-├── resume_api/                   # Main backend application package
-│   ├── app/
-│   │   ├── main.py               # FastAPI entry point & router aggregation
-│   │   ├── core/
-│   │   │   ├── config.py         # App configuration & environment variables
-│   │   │   └── security.py       # JWT creation, cookie verification, auth helpers
-│   │   ├── models/               # Internal data and state structures
-│   │   ├── routers/
-│   │   │   ├── analyzer.py       # PDF analysis, tailoring & PDF download endpoints
-│   │   │   ├── auth.py           # Login, refresh, logout & protected check
-│   │   │   └── matcher.py        # Legacy plain-text matcher endpoint
-│   │   ├── schemas/              # Pydantic request & response models
-│   │   └── services/
-│   │       ├── analyzer.py       # LangGraph resume analysis & tailoring pipeline
-│   │       ├── matcher.py        # Plain-text matching pipeline
-│   │       ├── matching_utils.py # Skill comparison and evidence helpers
-│   │       └── pdf_service.py    # PDF text extraction and PDF creation
-│   ├── temp_resumes/             # Transient storage for generated tailored PDFs
-│   ├── tests/                    # Pytest test suite (scenarios, regressions, v4)
-│   └── README.md                 # Package-level documentation
+├── app/
+│   ├── main.py               # FastAPI application entry point & router aggregation
+│   ├── core/
+│   │   ├── config.py         # App configuration & environment variables
+│   │   └── security.py       # JWT creation, cookie verification, auth helpers
+│   ├── models/               # Internal data and state structures
+│   ├── routers/
+│   │   ├── analyzer.py       # PDF analysis, tailoring & PDF download endpoints
+│   │   ├── auth.py           # Login, refresh, logout & protected check
+│   │   └── matcher.py        # Legacy plain-text matcher endpoint
+│   ├── schemas/              # Pydantic request & response models
+│   └── services/
+│       ├── analyzer.py       # LangGraph resume analysis & tailoring pipeline
+│       ├── matcher.py        # Plain-text matching pipeline
+│       ├── matching_utils.py # Skill comparison and evidence helpers
+│       └── pdf_service.py    # PDF text extraction and PDF creation
+├── tests/                    # Pytest test suite (scenarios, regressions, unit tests)
+├── temp_resumes/             # Transient storage for generated tailored PDFs
+├── requirements.txt          # Python pip dependencies
+├── environment.yml           # Conda environment definition
+├── .gitignore                # Git ignore rules
+└── README.md                 # Repository documentation
 ```
 
 ---
@@ -109,7 +109,7 @@ Configure the following environment variables if needed (defaults shown below):
 
 ### 4. Run the API Server
 
-From the `resume_matcher.Apis/resume_api` directory:
+From the `resume_matcher.Apis` directory:
 
 ```powershell
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
@@ -177,7 +177,7 @@ The core analysis in `app/services/analyzer.py` executes a multi-step graph:
 
 ## Testing
 
-Run the automated test suite from `resume_matcher.Apis/resume_api`:
+Run the automated test suite from `resume_matcher.Apis`:
 
 ```powershell
 pytest tests/
@@ -202,5 +202,5 @@ pytest tests/test_analyzer.py
 
 - **CORS Configuration**: By default, no wildcard CORS middleware is enabled. During local development, the frontend proxy forwards requests seamlessly. When deploying across domains, configure explicit CORS origins with `allow_credentials=True`.
 - **Authentication Store**: The current version uses an in-memory dictionary for mock users. Production deployments should connect this to a persistent database (PostgreSQL, SQLite, etc.).
-- **PDF Storage & Ownership**: Generated PDFs are saved temporarily in `resume_api/temp_resumes/` and mapped to the requesting user in memory. File access is strictly restricted to the user who requested the analysis.
+- **PDF Storage & Ownership**: Generated PDFs are saved temporarily in `temp_resumes/` and mapped to the requesting user in memory. File access is strictly restricted to the user who requested the analysis.
 - **PDF Constraints**: Requires selectable text-based PDFs (up to 10 MB). Scanned image PDFs without an OCR text layer will return a validation error.
