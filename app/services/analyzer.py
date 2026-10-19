@@ -1,6 +1,7 @@
 import re
 import json
 import logging
+from difflib import SequenceMatcher
 from time import perf_counter
 import httpx
 from typing import List, Dict, Any
@@ -32,6 +33,59 @@ def chat(**kwargs):
 def normalize_whitespace(text: str) -> str:
     return " ".join(text.split())
 
+def normalize_evidence(text: str) -> str:
+    """Normalize harmless quote differences without accepting invented evidence."""
+    return re.sub(r"[^a-z0-9+#.]+", " ", normalize_whitespace(text).lower()).strip()
+
+def resolve_evidence(jd: str, evidence: str, skill: str) -> str | None:
+    evidence_norm = normalize_evidence(evidence)
+    if not evidence_norm:
+        return None
+    candidates = [part.strip() for part in re.split(r"(?<=[.!?])\s+|[\r\n]+", jd) if part.strip()]
+    for candidate in candidates:
+        candidate_norm = normalize_evidence(candidate)
+        if (evidence_norm in candidate_norm or candidate_norm in evidence_norm) and find_skill_in_text(skill, candidate):
+            return candidate
+    scored = [(SequenceMatcher(None, evidence_norm, normalize_evidence(candidate)).ratio(), candidate)
+              for candidate in candidates if find_skill_in_text(skill, candidate)]
+    if scored:
+        score, candidate = max(scored)
+        if score >= 0.78:
+            return candidate
+    return None
+
+def detect_resume_sections(text: str) -> set[str]:
+    known = {"summary", "profile", "objective", "experience", "employment", "work experience",
+             "projects", "education", "skills", "technical skills", "certifications", "contact",
+             "contact details", "achievements", "awards", "publications"}
+    found = set()
+    for line in text.splitlines():
+        heading = re.sub(r"[^a-z ]", "", line.strip().lower()).strip()
+        if heading in known:
+            found.add(heading)
+    return found
+
+def validate_tailored_content(original: str, tailored: TailoredContent) -> None:
+    original_norm = normalize_evidence(original)
+    existing_sections = detect_resume_sections(original)
+    aliases = {"employment": "experience", "work experience": "experience",
+               "technical skills": "skills", "contact details": "contact"}
+    existing_groups = {aliases.get(item, item) for item in existing_sections}
+    for section in tailored.sections:
+        heading = re.sub(r"[^a-z ]", "", section.heading.strip().lower()).strip()
+        group = aliases.get(heading, heading)
+        if existing_groups and group not in existing_groups:
+            raise ValueError(f"Hallucination guard: added section '{section.heading}' not present in the original resume.")
+        if not existing_groups and heading not in {"resume", "original resume"}:
+            raise ValueError(f"Hallucination guard: unstructured source cannot support a new '{section.heading}' section.")
+    full_text = "\n".join(section.content for section in tailored.sections)
+    factual_patterns = [r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", r"(?:\+?\d[\d ()-]{7,}\d)",
+                        r"\b(?:19|20)\d{2}\b", r"\b\d+(?:\.\d+)?%\b", r"\b\d+\.\d+/\d+\.\d+\b"]
+    for pattern in factual_patterns:
+        for value in re.findall(pattern, full_text):
+            if normalize_evidence(value) not in original_norm:
+                raise ValueError(f"Hallucination guard: introduced factual value '{value}'.")
+
 def validate_input(state: State):
     jd = state.get('job_description', '').strip()
     if not jd:
@@ -48,7 +102,6 @@ def extract_resume_text(state: State):
 def extract_and_validate_jd_reqs(state: State):
     schema = ExtractedRequirements.model_json_schema()
     jd = state["job_description"]
-    jd_lower = normalize_whitespace(jd).lower()
     warnings = list(state.get('warnings', []))
     anchors = extract_known_requirements(jd)
     accepted = {}
@@ -91,15 +144,12 @@ def extract_and_validate_jd_reqs(state: State):
                     seen.add(canonical)
                     continue
                     
-                evidence_norm = normalize_whitespace(r.evidence)
-                
-                if not evidence_norm or evidence_norm.lower() not in jd_lower:
-                    bad_evidence.append(f"Quote '{r.evidence}' for {r.skill} not found exactly in JD.")
+                resolved_evidence = resolve_evidence(jd, r.evidence, r.skill)
+                if not resolved_evidence:
+                    bad_evidence.append(f"Quote '{r.evidence}' for {r.skill} could not be grounded in the JD.")
                     continue
-                    
-                if not find_skill_in_text(r.skill, evidence_norm):
-                    bad_evidence.append(f"Quote '{r.evidence}' for {r.skill} does not mention the skill.")
-                    continue
+                r.evidence = resolved_evidence
+                evidence_norm = normalize_whitespace(resolved_evidence)
                     
                 # Explicit preference language is not an exclusion from the role.
                 # Only override when the quote concerns a single extracted skill,
@@ -155,19 +205,22 @@ def match_skills(state: State):
         skill = req["skill"]
         priority = req["priority"]
         
-        # Omit unspecified and not_required entirely from matched/missing lists
-        if priority in ["not_required", "unspecified"]:
+        if priority == "not_required":
             continue
+        # A technology mentioned without preference/exclusion language is still a
+        # relevant requirement. Keep its source classification, but include it in
+        # the primary coverage lists rather than silently dropping it.
+        effective_priority = "required" if priority == "unspecified" else priority
             
         evidence = find_skill_in_text(skill, resume)
         if evidence:
             resume_evidence[skill] = f"...{evidence.strip()}..."
-            if priority == "required":
+            if effective_priority == "required":
                 mention_req.append(skill)
             else:
                 mention_pref.append(skill)
         else:
-            if priority == "required":
+            if effective_priority == "required":
                 non_mention_req.append(skill)
             else:
                 non_mention_pref.append(skill)
@@ -196,7 +249,8 @@ def tailor_resume(state: State):
                 f"{state['mention_skills'] + state['preferred_skills_matched']}. "
                 "CRITICAL RULES: "
                 "1. NEVER invent employers, dates, metrics, or technologies not present in the original resume.\n"
-                "2. Preserve the FULL structure including Name, Contact Details, Summary, Employment, Projects, Education, and Skills.\n"
+                "2. Retain ONLY sections that exist in the original. Never create missing sections or placeholders. "
+                "If the source has no recognizable headings, return it as one section named 'Resume'.\n"
                 "3. Do not duplicate sections. Do not lose CGPA or metrics.\n"
                 "4. Do not add skills they do not have.\n"
                 "Return a structured JSON with 'sections', 'changes_made', and 'suggestions'.\n"
@@ -214,6 +268,7 @@ def tailor_resume(state: State):
                 options={"temperature": 0.1, "num_predict": OLLAMA_TAILOR_MAX_TOKENS}
             )
             tailored = TailoredContent.model_validate_json(response.message.content)
+            validate_tailored_content(state['resume_txt'], tailored)
             
             full_text = "\n\n".join([f"{sec.heading.upper()}\n{sec.content}" for sec in tailored.sections])
             

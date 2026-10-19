@@ -1,4 +1,5 @@
 import io
+import re
 from pypdf import PdfReader
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
@@ -14,17 +15,28 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
         if reader.is_encrypted:
             raise ValueError("PDF is encrypted.")
             
-        text = ""
+        pages = []
         for page in reader.pages:
-            page_text = page.extract_text()
+            # Layout mode does a substantially better job on multi-column resumes.
+            # Fall back for PDFs whose content stream cannot be handled in that mode.
+            try:
+                page_text = page.extract_text(extraction_mode="layout")
+            except (TypeError, ValueError):
+                page_text = page.extract_text()
             if page_text:
-                text += page_text + "\n\n"
+                pages.append(page_text)
         
-        cleaned = text.strip()
-        if len(cleaned) < 50:
-            raise ValueError("PDF contains little to no text (OCR is required for scanned documents).")
+        cleaned = "\n\n".join(pages).strip()
+        if not cleaned:
+            raise ValueError("PDF has no extractable text. Upload a text-based PDF or run OCR on the scanned document first.")
+        if len(re.sub(r"\s+", "", cleaned)) < 10:
+            raise ValueError("PDF contains too little readable text to analyze reliably.")
             
         return cleaned
+    except ValueError as e:
+        if str(e).startswith("Failed to read PDF:"):
+            raise
+        raise ValueError(f"Failed to read PDF: {str(e)}") from e
     except Exception as e:
         raise ValueError(f"Failed to read PDF: {str(e)}")
 

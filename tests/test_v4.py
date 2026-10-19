@@ -102,9 +102,12 @@ def test_regression_jd_extraction(mock_chat):
     result = run_analyzer_sync(pdf_bytes, jd_text, "test_user")
     
     assert len(result["mention_skills"]) == 10, f"Expected 10 required, got {result['mention_skills']}"
-    assert result["non_mention_skills"] == ["postgresql"]
+    assert result["non_mention_skills"] == ["postgresql", "graphql"]
     assert len(result["preferred_skills_matched"]) == 6
     assert set(result["preferred_skills_not_found"]) == {"redis", "kubernetes"}
     
     assert result.get("extraction_status") == "success"
-    assert "CGPA" not in result["changes_made"][0]
+    # The mocked tailoring response invents sections that are absent from this
+    # unstructured source, so the factual guard must return the original.
+    assert result["changes_made"] == []
+    assert any("Hallucination guard" in warning for warning in result["warnings"])

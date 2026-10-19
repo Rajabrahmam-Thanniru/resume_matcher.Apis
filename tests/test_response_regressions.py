@@ -1,4 +1,5 @@
 import json
+import pytest
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -87,8 +88,50 @@ def test_extraction_warning_identifies_rejected_skills():
         })
     assert mocked.call_count == 3
     assert [r['skill'] for r in result['requirements']] == ['react']
-    assert any('Rust' in warning and 'not found exactly' in warning for warning in result['warnings'])
-    assert any('Scala' in warning and 'does not mention' in warning for warning in result['warnings'])
+    assert any('Rust' in warning and 'could not be grounded' in warning for warning in result['warnings'])
+    assert any('Scala' in warning and 'could not be grounded' in warning for warning in result['warnings'])
+
+
+def test_unspecified_skills_are_included_in_primary_coverage():
+    from app.services.analyzer import match_skills
+    result = match_skills({
+        'resume_txt': 'Built React.js apps with Next.js, Redux, Jest, and REST APIs.',
+        'requirements': [
+            {'skill': skill, 'priority': 'unspecified', 'evidence': skill}
+            for skill in ['react', 'next.js', 'redux', 'jest', 'rest apis', 'typescript']
+        ],
+    })
+    assert set(result['mention_skills']) == {'react', 'next.js', 'redux', 'jest', 'rest apis'}
+    assert result['non_mention_skills'] == ['typescript']
+
+
+def test_relaxed_evidence_accepts_punctuation_but_not_invented_quotes():
+    from app.services.analyzer import resolve_evidence
+    jd = 'Experience with React, Next.js, and Redux is required.'
+    assert resolve_evidence(jd, 'Experience with React Next.js and Redux is required', 'react') == jd
+    assert resolve_evidence(jd, 'We build amazing Rust services.', 'rust') is None
+
+
+def test_tailoring_rejects_sections_missing_from_source():
+    from app.schemas.analyzer import TailoredContent
+    from app.services.analyzer import validate_tailored_content
+    tailored = TailoredContent.model_validate({
+        'sections': [{'heading': 'Employment', 'content': 'Engineer, XYZ Company | 2020 - Present'}],
+        'changes_made': [], 'suggestions': [],
+    })
+    with pytest.raises(ValueError, match='unstructured source'):
+        validate_tailored_content('Raja is a Python and FastAPI engineer.', tailored)
+
+
+def test_short_text_pdf_is_accepted(tmp_path):
+    from fpdf import FPDF
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font('Arial', size=12)
+    pdf.cell(0, 10, text='Jane Doe - Skills: Java')
+    path = tmp_path / 'short.pdf'
+    pdf.output(path)
+    assert 'Java' in extract_text_from_pdf(path.read_bytes())
 
 
 def test_known_skills_repair_wrong_quotes_and_omissions():

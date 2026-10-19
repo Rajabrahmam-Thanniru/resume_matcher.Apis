@@ -1,6 +1,17 @@
 import re
 
 SKILL_ALIASES = {
+    "python": ["python"],
+    "java": ["java"],
+    "sql": ["sql"],
+    "html": ["html", "html5"],
+    "css": ["css", "css3"],
+    "git": ["git"],
+    "aws": ["aws", "amazon web services"],
+    "azure": ["azure", "microsoft azure"],
+    "django": ["django"],
+    "fastapi": ["fastapi", "fast api"],
+    "spring boot": ["spring boot", "springboot"],
     "react": ["react", "react.js", "reactjs"],
     "c#": ["c#", "c-sharp", "c sharp", "csharp"],
     "c++": ["c++", "cpp", "c plus plus"],
@@ -10,7 +21,7 @@ SKILL_ALIASES = {
     "vue.js": ["vue.js", "vuejs", "vue"],
     "postgresql": ["postgresql", "postgres"],
     "typescript": ["typescript", "ts"],
-    "javascript": ["javascript", "js"],
+    "javascript": ["javascript", "modern javascript", "javascript es6", "js"],
     "golang": ["go", "golang"],
     "firebase": ["firebase"],
     "firestore": ["firestore"],
@@ -69,7 +80,7 @@ def extract_known_requirements(jd: str) -> dict:
     return result
 
 def normalize_skill(skill: str) -> str:
-    s = skill.strip().lower()
+    s = re.sub(r"\s+", " ", skill.strip().lower())
     for canonical, aliases in SKILL_ALIASES.items():
         if s in aliases:
             return canonical
