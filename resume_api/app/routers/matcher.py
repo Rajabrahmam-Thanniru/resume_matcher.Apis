@@ -33,6 +33,8 @@ def match_resume(
             mention_skills=result.get("mention_skills", []),
             non_mention_skills=result.get("non_mention_skills", [])
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
