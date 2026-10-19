@@ -10,3 +10,7 @@ app.include_router(analyzer.router, prefix="/api", tags=["Advanced PDF Analyzer"
 @app.get("/")
 def home():
     return {"message": 'oii server is up and running mr K'}
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
